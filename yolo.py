@@ -6,6 +6,7 @@ Class definition of YOLO_v3 style detection model on image and video
 import colorsys
 import os
 from timeit import default_timer as timer
+#from keras.backend.theano_backend import reset_uids
 
 import numpy as np
 from keras import backend as K
@@ -17,6 +18,8 @@ from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
 from yolo3.utils import letterbox_image
 import os
 from keras.utils import multi_gpu_model
+
+import cv2
 
 class YOLO(object):
     _defaults = {
@@ -99,8 +102,8 @@ class YOLO(object):
                 score_threshold=self.score, iou_threshold=self.iou)
         return boxes, scores, classes
 
-    def detect_image(self, image):
-        start = timer()
+
+    def fetch_dict(self, image):
 
         if self.model_image_size != (None, None):
             assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
@@ -126,51 +129,106 @@ class YOLO(object):
 
         print('Found {} boxes for {}'.format(len(out_boxes), 'img'))
 
-        font = ImageFont.truetype(font='font/FiraMono-Medium.otf',
-                    size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
-        thickness = (image.size[0] + image.size[1]) // 300
+        output_dict = dict()
+        output_dict['pred_classes'] = []
+        output_dict['boxes'] = []
+        output_dict['scores'] = []
+        output_dict['colors'] = []
 
         for i, c in reversed(list(enumerate(out_classes))):
             predicted_class = self.class_names[c]
             box = out_boxes[i]
-            score = out_scores[i]
-
-            label = '{} {:.2f}'.format(predicted_class, score)
-            draw = ImageDraw.Draw(image)
-            label_size = draw.textsize(label, font)
+            score = out_scores[i]            
 
             top, left, bottom, right = box
             top = max(0, np.floor(top + 0.5).astype('int32'))
             left = max(0, np.floor(left + 0.5).astype('int32'))
             bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
             right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
-            print(label, (left, top), (right, bottom))
+            #print(label, (left, top), (right, bottom))
 
-            if top - label_size[1] >= 0:
-                text_origin = np.array([left, top - label_size[1]])
-            else:
-                text_origin = np.array([left, top + 1])
+            area_thresh = 0.75
+            #Finding area of bbox
+            bbox_area = abs(right - left) * abs(bottom - top)
+            frame_area = image.size[0] * image.size[1]
+            if bbox_area > frame_area * area_thresh**2 or predicted_class != 'person':
+                continue
 
-            # My kingdom for a good redistributable image drawing library.
-            for i in range(thickness):
-                draw.rectangle(
-                    [left + i, top + i, right - i, bottom - i],
-                    outline=self.colors[c])
-            draw.rectangle(
-                [tuple(text_origin), tuple(text_origin + label_size)],
-                fill=self.colors[c])
-            draw.text(text_origin, label, fill=(0, 0, 0), font=font)
-            del draw
+            output_dict['pred_classes'].append(predicted_class)
+            output_dict['boxes'].append((left, top, right, bottom))
+            output_dict['scores'].append(score)
+            output_dict['colors'].append(self.colors[c])
+
+        lengths = [len(x) for x in output_dict.values()]
+        assert len(set(lengths)) == 1, 'Unequal lengths of preditcion parameter lists'
+
+        return output_dict
+
+    def detect_image(self, image):
+
+        start = timer()
+
+        output_dict = self.fetch_dict(image)
+        #print('Number of detections= {}'.format(len(output_dict['pred_classes'])))
+
+        font = ImageFont.truetype(font='font/FiraMono-Medium.otf',
+            size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
+        thickness = (image.size[0] + image.size[1]) // 600
+
+        result = image.copy()
+
+        """
+        cv2_img = np.asarray(result)
+        cv2.imshow('Input', cv2_img)
+        cv2.waitKey(0)
+        cv2.destroyWindow('Input')
+        """
+
+        for i in range(len(output_dict['pred_classes'])):
+            
+            result = drawDetection(
+                result, 
+                output_dict['boxes'][i], output_dict['pred_classes'][i], output_dict['scores'][i], output_dict['colors'][i],
+                font, thickness)
 
         end = timer()
-        print(end - start)
-        return image
+        print('Frame predicction: {:.3f} seconds'.format(end - start))
+
+        return result
+
 
     def close_session(self):
         self.sess.close()
 
+def drawDetection(image, box, pred_class, score, color, font, thickness):
+
+    left, top, right, bottom = box
+
+    label = '{} {:.2f}'.format(pred_class, score)
+    draw = ImageDraw.Draw(image)
+    label_size = draw.textsize(label, font)
+
+    if top - label_size[1] >= 0:
+        text_origin = np.array([left, top - label_size[1]])
+    else:
+        text_origin = np.array([left, top + 1])
+
+    # My kingdom for a good redistributable image drawing library.
+    for i in range(thickness):
+        draw.rectangle(
+            [left + i, top + i, right - i, bottom - i],
+            outline=color)
+
+    draw.rectangle(
+        [tuple(text_origin), tuple(text_origin + label_size)],
+        fill=color)
+    draw.text(text_origin, label, fill=(0, 0, 0), font=font)
+
+    del draw
+    return image
+
 def detect_video(yolo, video_path, output_path=""):
-    import cv2
+
     vid = cv2.VideoCapture(video_path)
     if not vid.isOpened():
         raise IOError("Couldn't open webcam or video")
@@ -186,11 +244,19 @@ def detect_video(yolo, video_path, output_path=""):
     curr_fps = 0
     fps = "FPS: ??"
     prev_time = timer()
-    while True:
+    #cv2.namedWindow("result", cv2.WINDOW_NORMAL)
+    while vid.isOpened():
+
         return_value, frame = vid.read()
+
+        if cv2.waitKey(1) & 0xFF == ord('q') or return_value is None:
+            break
+
         image = Image.fromarray(frame)
         image = yolo.detect_image(image)
         result = np.asarray(image)
+        #cv2.imshow('Frame', frame)
+
         curr_time = timer()
         exec_time = curr_time - prev_time
         prev_time = curr_time
@@ -202,11 +268,13 @@ def detect_video(yolo, video_path, output_path=""):
             curr_fps = 0
         cv2.putText(result, text=fps, org=(3, 15), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                     fontScale=0.50, color=(255, 0, 0), thickness=2)
-        cv2.namedWindow("result", cv2.WINDOW_NORMAL)
+        
         cv2.imshow("result", result)
+        #print(type(result))
         if isOutput:
             out.write(result)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-    yolo.close_session()
+    
+    vid.release()
+    cv2.destroyAllWindows()
+    yolo.close_session()   
 
