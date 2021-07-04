@@ -20,6 +20,7 @@ import os
 from keras.utils import multi_gpu_model
 
 import cv2
+from time import sleep
 
 class YOLO(object):
     _defaults = {
@@ -276,5 +277,121 @@ def detect_video(yolo, video_path, output_path=""):
     
     vid.release()
     cv2.destroyAllWindows()
-    yolo.close_session()   
+    yolo.close_session()
+
+def object_track(yolo, video_path, output_path=""):
+
+    vid = cv2.VideoCapture(video_path)
+    if not vid.isOpened():
+        raise IOError("Couldn't open webcam or video")
+    video_FourCC    = int(vid.get(cv2.CAP_PROP_FOURCC))
+    video_fps       = vid.get(cv2.CAP_PROP_FPS)
+    video_size      = (int(vid.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                        int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+    isOutput = True if output_path != "" else False
+    if isOutput:
+        print("!!! TYPE:", type(output_path), type(video_FourCC), type(video_fps), type(video_size))
+        out = cv2.VideoWriter(output_path, video_FourCC, video_fps, video_size)
+    accum_time = 0
+    curr_fps = 0
+    fps = "FPS: ??"
+
+    while vid.isOpened():
+
+        return_value, frame = vid.read()
+
+        if not return_value:
+            break
+
+        cv2.imshow('Press \'q\' to stop', frame)
+        sleep(1/video_fps)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            choice = input('Continue? [y/N]: ')
+            if choice in ['n', 'N']:
+                break
+    cv2.destroyAllWindows()
+
+    if type(frame) != np.ndarray:
+        print('Found: {}'.format(type(frame)))
+        print('No frame to track from.\nAborting...')
+        exit()
+    
+    #Running YOLOV3 prediction
+    image = Image.fromarray(frame)
+    output_dict = yolo.fetch_dict(image)
+
+    print('Number of players found = {}'.format(len(output_dict['pred_classes'])))
+
+    tracker_types = ["Boosting", "MIL", "KCF", "TLD", "MedianFlow", "GOTURN", "MOSSE", "CSRT"]
+    for i, tracker_type in enumerate(tracker_types):
+        print('{}. {:s}'.format(i, tracker_type))
+
+    choice = int(input('Enter index number for tracker type choice: '))
+    if choice not in range(len(tracker_types)):
+        print('Invalid choice.\nAborting...')
+        exit()
+    
+    func_name = "Tracker" + tracker_types[choice] + "_create"
+    trackers = []
+    if hasattr(cv2, func_name) :
+        #Initialize trackers
+        func = getattr(cv2, func_name)
+        for i in range(len(output_dict['pred_classes'])):
+
+            box = output_dict['boxes'][i]
+            left, top, right, bottom = box
+            width = abs(right - left)
+            height = abs(bottom - top)
+            bbox = (left, top, width, height)
+
+            trackers.append(func())
+            trackers[i].init(frame, bbox)
+
+    else:
+        print('Specified Object Tracker not found.\nAborting...')
+        exit()
+
+    #Tracking detected objects in subsequent frames
+    prev_time = timer()
+    #cv2.namedWindow("result", cv2.WINDOW_NORMAL)
+    while vid.isOpened():
+
+        return_value, frame = vid.read()
+
+        if not return_value or cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+        image = Image.fromarray(frame)
+        result = image.copy()
+
+        font = ImageFont.truetype(font='font/FiraMono-Medium.otf',
+            size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
+        thickness = (image.size[0] + image.size[1]) // 600
+
+        for i in range(len(trackers)):
+            
+            ok, bbox = trackers[i].update(frame)
+            if ok:
+                result = drawDetection(result, bbox, output_dict['pred_classes'][i], output_dict['scores'][i], output_dict['colors'][i], font, thickness)
+
+        curr_time = timer()
+        exec_time = curr_time - prev_time
+        prev_time = curr_time
+        accum_time = accum_time + exec_time
+        curr_fps = curr_fps + 1
+        if accum_time > 1:
+            accum_time = accum_time - 1
+            fps = "FPS: " + str(curr_fps)
+            curr_fps = 0
+        cv2.putText(result, text=fps, org=(3, 15), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=0.50, color=(255, 0, 0), thickness=2)
+        
+        cv2.imshow("result", result)
+        #print(type(result))
+
+        #Write result into file
+
+        if isOutput:
+            out.write(result)
 
