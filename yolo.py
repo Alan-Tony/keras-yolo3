@@ -372,8 +372,11 @@ def object_track(yolo, video_path, output_path=""):
         for i in range(len(trackers)):
             
             ok, bbox = trackers[i].update(frame)
+            left, top, width, height = bbox
+            bbox = (left, top, left + width, top + height)
             if ok:
                 result = drawDetection(result, bbox, output_dict['pred_classes'][i], output_dict['scores'][i], output_dict['colors'][i], font, thickness)
+        result = np.asarray(result)
 
         curr_time = timer()
         exec_time = curr_time - prev_time
@@ -388,10 +391,10 @@ def object_track(yolo, video_path, output_path=""):
                     fontScale=0.50, color=(255, 0, 0), thickness=2)
         
         cv2.imshow("result", result)
-        #print(type(result))
-
-        #Write result into file
 
         if isOutput:
             out.write(result)
 
+    vid.release()
+    cv2.destroyAllWindows()
+    yolo.close_session()

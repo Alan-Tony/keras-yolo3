@@ -14,6 +14,11 @@ def detect_img(yolo):
         else:
             r_image = yolo.detect_image(image)
             r_image.show()
+        
+        choice = input('Continue? [Y/n]: ')
+        if choice in ['N', 'n']:
+            break
+        
     yolo.close_session()
 
 FLAGS = None
@@ -48,6 +53,11 @@ if __name__ == '__main__':
         '--image', default=False, action="store_true",
         help='Image detection mode, will ignore all positional arguments'
     )
+
+    parser.add_argument(
+        '--track', default=False, action="store_true",
+        help='Image detection mode, will ignore all positional arguments'
+    )
     '''
     Command line positional arguments -- for video detection mode
     '''
@@ -63,15 +73,20 @@ if __name__ == '__main__':
 
     FLAGS = parser.parse_args()
 
-    if FLAGS.image:
-        """
-        Image detection mode, disregard any remaining command line arguments
-        """
-        print("Image detection mode")
-        if "input" in FLAGS:
-            print(" Ignoring remaining command line arguments: " + FLAGS.input + "," + FLAGS.output)
-        detect_img(YOLO(**vars(FLAGS)))
-    elif "input" in FLAGS:
-        object_track(YOLO(**vars(FLAGS)), FLAGS.input, FLAGS.output)
+    if FLAGS.input:
+        if FLAGS.image:
+            """
+            Image detection mode, disregard any remaining command line arguments
+            """
+            print("Image detection mode")
+            if "input" in FLAGS:
+                print(" Ignoring remaining command line arguments: " + FLAGS.input + "," + FLAGS.output)
+            detect_img(YOLO(**vars(FLAGS)))
+
+        elif "output" in FLAGS:
+            if FLAGS.track:
+                object_track(YOLO(**vars(FLAGS)), FLAGS.input, FLAGS.output)
+            else:
+                detect_video(YOLO(**vars(FLAGS)), FLAGS.input, FLAGS.output)
     else:
-        print("Must specify at least video_input_path.  See usage with --help.")
+        print('No inputs provided. Aborting...')
