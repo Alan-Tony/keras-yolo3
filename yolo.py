@@ -27,7 +27,8 @@ class YOLO(object):
         "model_path": 'model_data/yolo.h5',
         "anchors_path": 'model_data/yolo_anchors.txt',
         "classes_path": 'model_data/coco_classes.txt',
-        "score" : 0.3,
+        #"score" : 0.3,
+        "score" : 0.85,
         "iou" : 0.45,
         "model_image_size" : (416, 416),
         "gpu_num" : 1,
@@ -152,10 +153,14 @@ class YOLO(object):
             #Finding area of bbox
             bbox_area = abs(right - left) * abs(bottom - top)
             frame_area = image.size[0] * image.size[1]
-            if bbox_area > frame_area * area_thresh**2 or predicted_class != 'person':
+            if bbox_area > frame_area * area_thresh**2 or (predicted_class != 'person' and predicted_class != 'sports ball'):
                 continue
 
-            output_dict['pred_classes'].append(predicted_class)
+            #output_dict['pred_classes'].append(predicted_class)
+            if(predicted_class == 'person'):
+                output_dict['pred_classes'].append("player")
+            elif(predicted_class == 'sports ball'):
+                output_dict['pred_classes'].append("football")
             output_dict['boxes'].append((left, top, right, bottom))
             output_dict['scores'].append(score)
             output_dict['colors'].append(self.colors[c])
