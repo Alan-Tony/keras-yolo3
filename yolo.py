@@ -9,13 +9,12 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 import colorsys
 import os
 from timeit import default_timer as timer
-#from keras.backend.theano_backend import reset_uids
 
 import numpy as np
 from keras import backend as K
 from keras.models import load_model
 from keras.layers import Input
-from PIL import Image, ImageFont, ImageDraw
+from PIL import Image, ImageFont
 
 from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
 from yolo3.utils import letterbox_image
@@ -25,7 +24,7 @@ from keras.utils import multi_gpu_model
 import cv2
 from time import sleep
 import easyocr
-import re
+from utils import drawDetection, player_detection, getJerseyColors
 
 class YOLO(object):
     _defaults = {
@@ -183,13 +182,6 @@ class YOLO(object):
 
         result = image.copy()
 
-        """
-        cv2_img = np.asarray(result)
-        cv2.imshow('Input', cv2_img)
-        cv2.waitKey(0)
-        cv2.destroyWindow('Input')
-        """
-
         for i in range(len(output_dict['pred_classes'])):
             
             text = '{:s}: {:.2f}'.format(output_dict['pred_classes'][i], output_dict['scores'][i])
@@ -206,61 +198,6 @@ class YOLO(object):
 
     def close_session(self):
         self.sess.close()
-
-def drawDetection(image, box, text, font, thickness):
-
-    left, top, right, bottom = box
-    text_color = (255, 0, 0)
-    text_box_fill = (0, 85, 255)
-
-    draw = ImageDraw.Draw(image)
-    label_size = draw.textsize(text, font)
-
-    if top - label_size[1] >= 0:
-        text_origin = np.array([left, top - label_size[1]])
-    else:
-        text_origin = np.array([left, top + 1])
-
-    # My kingdom for a good redistributable image drawing library.
-    for i in range(thickness):
-        draw.rectangle(
-            [left + i, top + i, right - i, bottom - i],
-            outline=text_box_fill)
-
-    draw.rectangle(
-        [tuple(text_origin), tuple(text_origin + label_size)],
-        fill=text_box_fill)
-    draw.text(text_origin, text, fill=text_color, font=font)
-
-    del draw
-    return image
-
-def player_detection(image, original, bbox, reader, font, thickness):
-
-    cv_img = np.asarray(original)
-    left, top, right, bottom = bbox
-    print(bbox)
-    cv_img = cv_img[top:bottom, left:right]
-
-    detections = reader.readtext(cv_img)
-
-    numbers = []
-    for detection in detections:
-
-        _, text, _ = detection
-        #Finding all numbers in the player's frame
-        numbers += re.findall('\d+', text)
-
-    numbers = list(map(int, numbers))
-    #print(numbers)
-    jnos = list(range(1, 101))
-    common = list((set(numbers).intersection(set(jnos))))
-    if len(common):
-        text = 'Jersey number: ' + str(max(common))
-    else:
-        text = "No jersey number found"
-
-    return drawDetection(image, bbox, text, font, thickness)
 
 def detect_video(yolo, video_path, output_path=""):
 
@@ -419,10 +356,12 @@ def object_track(yolo, video_path, output_path=""):
 
             #Changing the format of bbox to match draw detection's required format
             bbox = (left, top, left + width, top + height)
+            #Get jersey color
+            jersey_color = getJerseyColors(frame[top : top + height, left : left + width, :], bbox)
             if ok:
                 #text = '{:s}: {:.2f}'.format(output_dict['pred_classes'][i], output_dict['scores'][i])
                 #result = drawDetection(result, bbox, text, font, thickness)
-                result = player_detection(result, image, bbox, reader, font, thickness)
+                result = player_detection(result, image, bbox, reader, font, thickness, text_box_fill=jersey_color)
         result = np.asarray(result)
 
         curr_time = timer()
